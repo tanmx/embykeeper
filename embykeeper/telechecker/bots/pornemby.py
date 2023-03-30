@@ -15,4 +15,5 @@ class PornembyCheckin(BotCheckin):
             for k in keys:
                 if "点击签到" in k:
                     await message.click(k)
+                    return
         await super().message_handler(client, message)
