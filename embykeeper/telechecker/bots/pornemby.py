@@ -7,6 +7,7 @@ class PornembyCheckin(BotCheckin):
     name = "Pornemby"
     bot_username = "PronembyTGBot2_bot"
     bot_checkin_cmd = "/checkin"
+    bot_captcha_len = None
     bot_success_pat = r"(\d+)\s精币[\s\S]*(\d{3})\s精币"
 
     async def message_handler(self, client, message: Message):
