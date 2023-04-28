@@ -77,6 +77,6 @@ def WATERY(n, *args, **kw):
                 "今天又水一水~",
             ),
             *args,
-            **kw
+            **kw,
         )
     ] * n

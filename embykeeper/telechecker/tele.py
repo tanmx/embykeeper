@@ -66,9 +66,9 @@ class Client(_Client):
                 while True:
                     if not self.password:
                         if retry:
-                            msg = f'需要输入 "{self.phone_number}" 的两步验证密码 (不显示, 按回车确认): '
-                        else:
                             msg = f'密码错误, 请重新输入 "{self.phone_number}" 的两步验证密码 (不显示, 按回车确认):'
+                        else:
+                            msg = f'需要输入 "{self.phone_number}" 的两步验证密码 (不显示, 按回车确认): '
                         self.password = Prompt.ask(" " * 29 + msg, password=True)
                     try:
                         return await self.check_password(self.password)
@@ -164,7 +164,9 @@ class ClientsSession:
         accounts = config.get("telegram", [])
         for k, v in kw.items():
             accounts = [a for a in accounts if a.get(k, None) in to_iterable(v)]
-        return cls(accounts=accounts, proxy=config.get("proxy", None))
+        return cls(
+            accounts=accounts, proxy=config.get("proxy", None), sessiondir=config.get("sessiondir", None)
+        )
 
     @classmethod
     async def watchdog(cls, timeout=120):
@@ -228,9 +230,10 @@ class ClientsSession:
                 await client.storage.close()
                 # print(f'登出账号 "{client.phone_number}".')
 
-    def __init__(self, accounts, proxy=None, quiet=False):
+    def __init__(self, accounts, proxy=None, sessiondir=None, quiet=False):
         self.accounts = accounts
         self.proxy = proxy
+        self.sessiondir = sessiondir or user_data_dir(__name__)
         self.phones = []
         self.done = asyncio.Queue()
         self.quiet = quiet
@@ -251,7 +254,7 @@ class ClientsSession:
                         phone_number=account["phone"],
                         proxy=proxy,
                         lang_code="zh",
-                        workdir=user_data_dir(__name__),
+                        workdir=self.sessiondir,
                     )
                     await client.start()
                 except Unauthorized:
@@ -285,6 +288,8 @@ class ClientsSession:
                         self.lock.release()
                         await self.pool[phone]
                         await self.lock.acquire()
+                    if isinstance(self.pool[phone], asyncio.Task):
+                        continue
                     client, ref = self.pool[phone]
                     ref += 1
                     self.pool[phone] = (client, ref)

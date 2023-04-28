@@ -1,14 +1,18 @@
-FROM python:3.10-slim-buster
+FROM python:3.8-slim AS builder
+
+WORKDIR /src
+COPY . .
+
+RUN python -m venv /opt/venv \
+    && . /opt/venv/bin/activate \
+    && pip install --no-cache-dir -U pip setuptools wheel \
+    && pip install --no-cache-dir .
+
+FROM python:3.8-slim
+COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
+RUN touch config.toml
+ENV PATH="/opt/venv/bin:$PATH"
 
-VOLUME ["/root/.local/share/embykeeper"]
-
-COPY . .
-RUN apt update && apt install gcc -y && \
-    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
-    echo "Asia/Shanghai" >/etc/timezone && \
-    pip install -U pip && pip install .
-
-ENTRYPOINT ["embykeeper"]
-CMD ["config.toml"]
+ENTRYPOINT ["embykeeper", "--session-dir", "/app"]
