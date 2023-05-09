@@ -6,11 +6,11 @@ from enum import Flag, auto
 import string
 from typing import Iterable, List, Union
 
-import ddddocr
+from ddddocr import DdddOcr
 from loguru import logger
 from PIL import Image
 from pyrogram import filters
-from pyrogram.errors import UsernameNotOccupied
+from pyrogram.errors import UsernameNotOccupied, FloodWait
 from pyrogram.handlers import EditedMessageHandler, MessageHandler
 from pyrogram.types import InlineKeyboardMarkup, Message, ReplyKeyboardMarkup
 from thefuzz import fuzz
@@ -20,7 +20,7 @@ from ..tele import Client
 
 __ignore__ = True
 
-ocr = ddddocr.DdddOcr(beta=True, show_ad=False)
+ocr = DdddOcr(beta=True, show_ad=False)
 
 
 class MessageType(Flag):
@@ -67,9 +67,10 @@ class BotCheckin(BaseBotCheckin):
     bot_id: int = None  # Bot 的 UserID
     bot_username: str = None  # Bot 的 用户名
     bot_checkin_cmd: Union[str, List[str]] = ["/checkin"]  # Bot 依次执行的签到命令
+    bot_send_interval: int = 1  # 签到命令间等待的秒数
     bot_checkin_caption_pat: str = None  # 当 Bot 返回图片时, 仅当符合该 regex 才识别为验证码
     bot_text_ignore: Union[str, List[str]] = []  # 当含有列表中的关键词, 即忽略该消息
-    bot_captcha_len: Iterable = range(2, 7)  # 验证码的可能范围
+    bot_captcha_len: Iterable = None  # 验证码的可能范围
     bot_success_pat: str = r"(\d+)[^\d]*(\d+)"  # 当接收到成功消息后, 从消息中提取数字的模式
     bot_retry_wait: int = 2  # 失败时等待的秒数
     bot_use_history: int = None  # 首先尝试识别历史记录中最后一个验证码图片, 最多识别 N 条
@@ -80,6 +81,7 @@ class BotCheckin(BaseBotCheckin):
         super().__init__(*args, **kw)
         self._is_archived = False
         self._retries = 0
+        self._waiting = {}
 
     def get_filter(self):
         filter = filters.user(self.bot_id or self.bot_username)
@@ -108,11 +110,17 @@ class BotCheckin(BaseBotCheckin):
 
     async def start(self):
         ident = self.chat_name or self.bot_id or self.bot_username
-        try:
-            chat = await self.client.get_chat(ident)
-        except UsernameNotOccupied:
-            self.log.warning(f'初始化错误: 会话 "{ident}" 不存在.')
-            return False
+        while True:
+            try:
+                chat = await self.client.get_chat(ident)
+            except UsernameNotOccupied:
+                self.log.warning(f'初始化错误: 会话 "{ident}" 不存在.')
+                return False
+            except FloodWait as e:
+                self.log.info(f"初始化信息: Telegram 要求等待 {e.value} 秒.")
+                await asyncio.sleep(e.value)
+            else:
+                break
         async for d in self.client.get_dialogs(folder_id=1):
             if d.chat.id == chat.id:
                 self._is_archived = True
@@ -171,10 +179,13 @@ class BotCheckin(BaseBotCheckin):
         else:
             await self.client.send_message(self.bot_id or self.bot_username, cmd)
 
-    async def send_checkin(self):
-        for i, cmd in enumerate(to_iterable(self.bot_checkin_cmd)):
-            if not i:
+    async def send_checkin(self, retry=False):
+        cmds = to_iterable(self.bot_checkin_cmd)
+        for i, cmd in enumerate(cmds):
+            if retry and not i:
                 await asyncio.sleep(self.bot_retry_wait)
+            if i < len(cmds):
+                await asyncio.sleep(self.bot_send_interval)
             await self.send(cmd)
 
     async def _message_handler(self, client: Client, message: Message):
@@ -196,6 +207,12 @@ class BotCheckin(BaseBotCheckin):
             message.continue_propagation()
 
     async def message_handler(self, client: Client, message: Message, type=None):
+        text = message.text or message.caption
+        if text:
+            for p, k in self._waiting.items():
+                if re.search(p, text):
+                    k.set()
+                    self._waiting[p] = message
         type = type or self.message_type(message)
         if MessageType.TEXT in type:
             await self.on_text(message, message.text)
@@ -249,14 +266,14 @@ class BotCheckin(BaseBotCheckin):
         elif any(s in text for s in ("失败", "错误", "超时")):
             self.log.info(f"签到失败: 验证码错误, 正在重试.")
             await self.retry()
-        elif any(s in text for s in ("成功", "通过", "完成")):
+        elif any(s in text for s in ("成功", "通过", "完成", "获得")):
             matches = re.search(self.bot_success_pat, text)
             if matches:
                 self.log.info(f"[yellow]签到成功[/]: + {matches.group(1)} 分 -> {matches.group(2)} 分.")
             else:
                 matches = re.search(r"\d+", text)
                 if matches:
-                    self.log.info(f"[yellow]签到成功[/]: 当前 {matches.group(0)} 分.")
+                    self.log.info(f"[yellow]签到成功[/]: 当前/增加 {matches.group(0)} 分.")
                 else:
                     self.log.info(f"[yellow]签到成功[/].")
             self.finished.set()
@@ -270,7 +287,7 @@ class BotCheckin(BaseBotCheckin):
         self._retries += 1
         if self._retries <= self.retries:
             await asyncio.sleep(self.bot_retry_wait)
-            await self.send_checkin()
+            await self.send_checkin(retry=True)
         else:
             self.log.warning("超过最大重试次数.")
             self.finished.set()
@@ -278,6 +295,16 @@ class BotCheckin(BaseBotCheckin):
     async def fail(self, message=None):
         self.finished.set()
         self._retries = float("inf")
+
+    async def wait_until(self, pattern: str = ".", timeout: float = None):
+        self._waiting[pattern] = e = asyncio.Event()
+        try:
+            await asyncio.wait_for(e.wait(), timeout)
+        except asyncio.TimeoutError:
+            return None
+        else:
+            msg: Message = self._waiting[pattern]
+            return msg
 
 
 class AnswerBotCheckin(BotCheckin):

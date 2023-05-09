@@ -5,13 +5,14 @@ from rich.prompt import Prompt
 from appdirs import user_data_dir
 from loguru import logger
 from pyrogram import Client as _Client
-from pyrogram import raw, types, utils
+from pyrogram import raw, types, utils, filters
 from pyrogram.enums import SentCodeType
 from pyrogram.errors import BadRequest, RPCError, Unauthorized, SessionPasswordNeeded
+from pyrogram.handlers import MessageHandler
 from aiocache import Cache
 
 from .. import __name__, __version__
-from ..utils import to_iterable
+from ..utils import async_partial, to_iterable
 
 logger = logger.bind(scheme="telegram")
 
@@ -153,6 +154,25 @@ class Client(_Client):
                 if current >= total:
                     return
 
+    async def wait_reply(self, chat_id: Union[int, str], text: str = None, timeout: float = 3):
+        async def handler_func(client, message, future: asyncio.Future):
+            future.set_result(message)
+
+        future = asyncio.Future()
+        handler = MessageHandler(async_partial(handler_func, future=future), filters.chat(chat_id))
+        groups = self.dispatcher.groups
+        if 0 not in groups:
+            groups[0] = [handler]
+        else:
+            groups[0].append(handler)
+        try:
+            if text:
+                await self.send_message(chat_id, text)
+            msg: types.Message = await asyncio.wait_for(future, timeout)
+            return msg
+        finally:
+            groups[0].remove(handler)
+
 
 class ClientsSession:
     pool = {}
@@ -175,9 +195,9 @@ class ClientsSession:
             counter = {}
             while True:
                 await asyncio.sleep(10)
-                for p, v in cls.pool.items():
+                for p in list(cls.pool):
                     try:
-                        if v[1] <= 0:
+                        if cls.pool[p][1] <= 0:
                             if p in counter:
                                 counter[p] += 1
                                 if counter[p] >= timeout / 10:
@@ -186,7 +206,7 @@ class ClientsSession:
                                 counter[p] = 1
                         else:
                             counter.pop(p, None)
-                    except TypeError:
+                    except (TypeError, KeyError):
                         pass
         except asyncio.CancelledError:
             print("\r正在停止... ", end="")
@@ -206,6 +226,11 @@ class ClientsSession:
                 logger.debug(f'登出账号 "{client.phone_number}".')
                 await client.stop()
                 cls.pool.pop(phone, None)
+
+    @classmethod
+    async def clean_all(cls):
+        for phone in list(cls.pool):
+            await cls.clean(phone)
 
     @classmethod
     async def shutdown(cls):
