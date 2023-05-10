@@ -18,4 +18,4 @@ RUN touch config.toml \
     && echo "Asia/Shanghai" > /etc/timezone
 ENV PATH="/opt/venv/bin:$PATH"
 
-ENTRYPOINT ["embykeeper", "--session-dir", "/app"]
+ENTRYPOINT ["embykeeper", "--basedir", "/app"]
