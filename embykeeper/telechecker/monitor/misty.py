@@ -1,19 +1,21 @@
 import asyncio
 import string
+from importlib import resources
+
 from pyrogram.types import Message
 from PIL import Image
 from ddddocr import DdddOcr
 
+from embykeeper.data import ocr as ocr_models
 from ...utils import async_partial
-
 from .base import Monitor
-
-ocr = DdddOcr(show_ad=False)
-
-__ignore__ = True
 
 
 class MistyMonitor(Monitor):
+    with resources.path(ocr_models, "digit5-teko.onnx") as onnx:
+        with resources.path(ocr_models, "digit5-teko.json") as charsets:
+            ocr = DdddOcr(show_ad=False, import_onnx_path=str(onnx), charsets_path=str(charsets))
+
     name = "Misty"
     chat_name = "FreeEmbyGroup"
     chat_user = "MistyNoiceBot"
@@ -22,6 +24,7 @@ class MistyMonitor(Monitor):
     notify_create_name = True
 
     async def init(self, initial=True):
+        self.captcha = None
         self.log.info(f"正在初始化机器人状态.")
         wr = async_partial(self.client.wait_reply, self.bot_username)
         for _ in range(10 if initial else 3):
@@ -39,7 +42,7 @@ class MistyMonitor(Monitor):
                         data = await self.client.download_media(msg, in_memory=True)
                         image = Image.open(data)
                         self.captcha = (
-                            ocr.classification(image)
+                            self.ocr.classification(image)
                             .translate(str.maketrans("", "", string.punctuation))
                             .replace(" ", "")
                         )
@@ -59,11 +62,6 @@ class MistyMonitor(Monitor):
         else:
             self.log.bind(notify=True).warning(f"机器人状态初始化失败, 监控将停止.")
             return False
-
-    async def start(self):
-        self.captcha = None
-        if await self.init(initial=True):
-            return await super().start()
 
     async def on_trigger(self, message: Message, keys, reply):
         wr = async_partial(self.client.wait_reply, self.bot_username)

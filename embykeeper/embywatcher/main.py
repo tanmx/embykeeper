@@ -28,8 +28,8 @@ def is_ok(co):
         return True
 
 
-async def get_oldest(emby: Emby, n=10):
-    items = await emby.get_items(["Movie", "Episode"], limit=n, sort="DateCreated")
+async def get_latest(emby: Emby, n=10):
+    items = await emby.get_items(["Movie", "Episode"], limit=n, sort="DateCreated", ascending=False)
     i: Union[Movie, Episode]
     for i in items:
         yield i
@@ -133,7 +133,7 @@ async def watch(emby, time, progress, logger, retries=5):
     retry = 0
     while True:
         try:
-            async for obj in get_oldest(emby):
+            async for obj in get_latest(emby):
                 logger.info(f'开始尝试播放 "{obj.name}" ({time} 秒).')
                 while True:
                     try:

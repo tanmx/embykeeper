@@ -154,12 +154,17 @@ class Client(_Client):
                 if current >= total:
                     return
 
-    async def wait_reply(self, chat_id: Union[int, str], text: str = None, timeout: float = 3):
+    async def wait_reply(
+        self, chat_id: Union[int, str], text: str = None, timeout: float = 3, outgoing=False
+    ):
         async def handler_func(client, message, future: asyncio.Future):
             future.set_result(message)
 
         future = asyncio.Future()
-        handler = MessageHandler(async_partial(handler_func, future=future), filters.chat(chat_id))
+        filter = filters.chat(chat_id)
+        if not outgoing:
+            filter = filter & (~filters.outgoing)
+        handler = MessageHandler(async_partial(handler_func, future=future), filter)
         groups = self.dispatcher.groups
         if 0 not in groups:
             groups[0] = [handler]
@@ -184,9 +189,7 @@ class ClientsSession:
         accounts = config.get("telegram", [])
         for k, v in kw.items():
             accounts = [a for a in accounts if a.get(k, None) in to_iterable(v)]
-        return cls(
-            accounts=accounts, proxy=config.get("proxy", None), sessiondir=config.get("sessiondir", None)
-        )
+        return cls(accounts=accounts, proxy=config.get("proxy", None), basedir=config.get("basedir", None))
 
     @classmethod
     async def watchdog(cls, timeout=120):
@@ -255,10 +258,10 @@ class ClientsSession:
                 await client.storage.close()
                 # print(f'登出账号 "{client.phone_number}".')
 
-    def __init__(self, accounts, proxy=None, sessiondir=None, quiet=False):
+    def __init__(self, accounts, proxy=None, basedir=None, quiet=False):
         self.accounts = accounts
         self.proxy = proxy
-        self.sessiondir = sessiondir or user_data_dir(__name__)
+        self.basedir = basedir or user_data_dir(__name__)
         self.phones = []
         self.done = asyncio.Queue()
         self.quiet = quiet
@@ -279,7 +282,7 @@ class ClientsSession:
                         phone_number=account["phone"],
                         proxy=proxy,
                         lang_code="zh",
-                        workdir=self.sessiondir,
+                        workdir=self.basedir,
                     )
                     await client.start()
                 except Unauthorized:

@@ -8,6 +8,7 @@ import string
 from typing import Iterable, List, Sized, Union
 
 from loguru import logger
+from appdirs import user_data_dir
 from pyrogram import filters
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import UsernameNotOccupied, UserNotParticipant, FloodWait
@@ -101,9 +102,10 @@ class Monitor:
     chat_reply: str = None  # 回复的内容, 可以通过 @property 类属性重写.
     notify_create_name: bool = False  # 启动时生成 unique name 并提示
 
-    def __init__(self, client: Client, nofail=True, config: dict = {}):
+    def __init__(self, client: Client, nofail=True, basedir=None, config: dict = {}):
         self.client = client
         self.nofail = nofail
+        self.basedir = basedir or user_data_dir(__name__)
         self.config = config
         self.log = logger.bind(scheme="telemonitor", name=self.name, username=client.me.name)
         self.session = None
@@ -174,12 +176,20 @@ class Monitor:
             return False
         if self.notify_create_name:
             self.unique_name = self.get_unique_name()
+
         spec = f"[green]{chat.title}[/] [gray50](@{chat.username})[/]"
-        self.log.info(f"开始监视: {spec}.")
-        async with self.listener():
-            await self.failed.wait()
-            self.log.error(f"发生错误, 不再监视: {spec}.")
+        if await self.init():
+            self.log.info(f"开始监视: {spec}.")
+            async with self.listener():
+                await self.failed.wait()
+                self.log.error(f"发生错误, 不再监视: {spec}.")
+                return False
+        else:
+            self.log.bind(notify=True).warning(f"机器人状态初始化失败, 监控将停止.")
             return False
+
+    async def init(self):
+        return True
 
     @classmethod
     def keys(cls, message: Message):

@@ -2,13 +2,11 @@ import asyncio
 import csv
 from datetime import datetime
 from pyrogram.types import Message
-from appdirs import user_cache_dir
 from pathlib import Path
 
 from ...utils import truncate_str
 from ..link import Link
 
-import embykeeper
 from .base import Monitor
 
 
@@ -29,7 +27,6 @@ class PornembyMonitor:
         chat_name = ["Pornemby", "PornembyFun"]
         chat_user = "pornemby_question_bot"
         chat_keyword = r"问题\d+：(.*?)\n+(A:.*\n+B:.*\n+C:.*\n+D:.*)\n(?!\n*答案)"
-        cache_file = Path(user_cache_dir(embykeeper.__name__)) / "pornemby_question.csv"
         cache = {}
         lock = asyncio.Lock()
 
@@ -39,6 +36,10 @@ class PornembyMonitor:
             "C": "🅲",
             "D": "🅳",
         }
+
+        def __init__(self, *args, **kw):
+            super().__init__(*args, **kw)
+            self.cache_file = Path(self.basedir) / "pornemby_question.csv"
 
         async def update_cache(self, to_date=None):
             cache_timestamp = self.cache_file.with_name("pornemby_question.timestamp")
@@ -103,11 +104,12 @@ class PornembyMonitor:
             except asyncio.TimeoutError:
                 self.log.debug("等待其他协程缓存问题答案历史.")
                 async with self.lock:
-                    pass
+                    return True
             else:
                 try:
                     await self.update_cache()
-                    self.cache = await self.read_cache()
+                    self.__class__.cache = await self.read_cache()
+                    return True
                 finally:
                     self.lock.release()
 
@@ -119,10 +121,9 @@ class PornembyMonitor:
             except asyncio.CancelledError:
                 raise
 
-        async def start(self):
-            await self.update()
+        async def init(self):
             t = asyncio.create_task(self.cache_watchdog())
-            return await super().start()
+            return await self.update()
 
         async def on_trigger(self, message: Message, key, reply):
             spec = f"[gray50]({truncate_str(key[0], 10)})[/]"
