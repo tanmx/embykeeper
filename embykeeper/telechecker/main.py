@@ -11,14 +11,13 @@ from importlib import import_module
 from dateutil import parser
 from pyrogram.enums import ChatType
 from pyrogram.handlers import MessageHandler
-from pyrogram.types import Message, Update
+from pyrogram.types import Message
 from rich import box
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress import MofNCompleteColumn, Progress, SpinnerColumn
 from rich.table import Column, Table
 from rich.text import Text
-from rich.pretty import pprint
 
 from ..utils import batch, flatten, idle, time_in_range, async_partial
 from ..log import logger, formatter
@@ -131,6 +130,8 @@ async def dump_message(client: Client, message: Message, table: Table):
 
 
 async def checkin_task(checkiner: BaseBotCheckin, sem, wait=0):
+    if wait > 0:
+        checkiner.log.debug(f"随机启动等待: 将等待 {wait} 秒以启动.")
     await asyncio.sleep(wait)
     async with sem:
         return await checkiner._start()
@@ -141,6 +142,7 @@ async def gather_task(tasks, username):
 
 
 async def checkiner(config: dict, instant=False):
+    logger.debug("正在启动每日签到模块, 请等待登录.")
     async with ClientsSession.from_config(config) as clients:
         coros = []
         async for tg in clients:
@@ -153,7 +155,7 @@ async def checkiner(config: dict, instant=False):
             checkiners = [
                 cls(
                     tg,
-                    retries=config.get("retries", 10),
+                    retries=config.get("retries", 4),
                     timeout=config.get("timeout", 120),
                     nofail=config.get("nofail", True),
                 )
@@ -163,7 +165,7 @@ async def checkiner(config: dict, instant=False):
             names = []
             for c in checkiners:
                 names.append(c.name)
-                wait = 0 if instant else random.randint(0, 60 * config.get("random", 15))
+                wait = 0 if instant else random.randint(0, 60 * config.get("random", 60))
                 task = asyncio.create_task(checkin_task(c, sem, wait))
                 tasks.append(task)
             coros.append(gather_task(tasks, username=tg.me.name))
@@ -198,6 +200,7 @@ async def checkiner(config: dict, instant=False):
 
 
 async def monitorer(config: dict):
+    logger.debug("正在启动消息监控模块, 请等待登录.")
     jobs = []
     async with ClientsSession.from_config(config, monitor=True) as clients:
         async for tg in clients:
@@ -226,6 +229,7 @@ async def monitorer(config: dict):
 
 
 async def messager(config: dict, scheduler):
+    logger.debug("正在启动自动水群模块.")
     async with ClientsSession.from_config(config, send=True) as clients:
         async for tg in clients:
             log = logger.bind(scheme="telemessager", username=tg.me.name)
@@ -359,6 +363,7 @@ async def notifier(config: dict):
         except IndexError:
             notifier = None
     if notifier:
+        logger.debug("正在启动消息反馈模块, 请等待登录.")
         async with ClientsSession(
             [notifier], proxy=config.get("proxy", None), basedir=config.get("basedir", None)
         ) as clients:

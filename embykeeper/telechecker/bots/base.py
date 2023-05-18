@@ -33,7 +33,7 @@ class MessageType(Flag):
 class BaseBotCheckin(ABC):
     name = None
 
-    def __init__(self, client: Client, retries=10, timeout=120, nofail=True):
+    def __init__(self, client: Client, retries=4, timeout=120, nofail=True):
         self.client = client
         self.retries = retries
         self.timeout = timeout
@@ -118,6 +118,9 @@ class BotCheckin(BaseBotCheckin):
                 chat = await self.client.get_chat(ident)
             except UsernameNotOccupied:
                 self.log.warning(f'初始化错误: 会话 "{ident}" 不存在.')
+                return False
+            except KeyError as e:
+                self.log.info(f"初始化错误: 无法访问, 您可能已被封禁: {e}.")
                 return False
             except FloodWait as e:
                 self.log.info(f"初始化信息: Telegram 要求等待 {e.value} 秒.")
@@ -265,7 +268,7 @@ class BotCheckin(BaseBotCheckin):
     async def on_text(self, message: Message, text: str):
         if any(s in text for s in to_iterable(self.bot_text_ignore)):
             pass
-        elif any(s in text for s in ("拉黑", "黑名单", "冻结")):
+        elif any(s in text for s in ("拉黑", "黑名单", "冻结", "未找到用户")):
             self.log.warning(f"签到失败: 账户错误.")
             await self.fail()
         elif any(s in text for s in ("失败", "错误", "超时")):
