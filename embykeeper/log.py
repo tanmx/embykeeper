@@ -23,7 +23,9 @@ def formatter(record):
         "telemonitor": "消息监控",
         "telemessager": "定时水群",
         "telelink": "账号服务",
-        "embywatcher": "Emby 保活",
+        "telenotifier": "消息推送",
+        "embywatcher": "Emby保活",
+        "datamanager": "下载器",
     }
 
     if scheme in ("telegram", "telechecker", "telemonitor", "telemessager", "telelink"):
@@ -33,6 +35,8 @@ def formatter(record):
     elif scheme == "embywatcher":
         ident = ifextra(["server", "username"], " ([cyan]{}:{}[/])")
         return f"[blue]{scheme_names[scheme]}[/]{ident}: {{message}}"
+    elif scheme == "datamanager":
+        return f"[blue]{scheme_names[scheme]}[/]: {{message}}"
     else:
         return "{message}"
 
@@ -43,4 +47,4 @@ def initialize(level="INFO"):
         console=Console(stderr=True), markup=True, rich_tracebacks=True, tracebacks_suppress=[asyncio]
     )
     handler.setFormatter(Formatter(None, "[%m/%d %H:%M]"))
-    logger.add(handler, format=formatter, level=level)
+    logger.add(handler, format=formatter, level=level, colorize=False)
